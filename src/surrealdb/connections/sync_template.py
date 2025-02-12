@@ -1,8 +1,7 @@
 from asyncio import Queue
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, Dict, Any, Union
 from uuid import UUID
-
-from surrealdb.data.types.record_id import RecordID
+from surrealdb.data.types.record_id import RecordID, QueryResult
 from surrealdb.data.types.table import Table
 
 
@@ -133,7 +132,7 @@ class SyncTemplate:
         """
         raise NotImplementedError(f"let not implemented for: {self}")
 
-    def query(self, query: str, vars: Optional[Dict] = None) -> Union[List[dict], dict]:
+    def query(self, query: str, vars: Optional[Dict] = None) -> QueryResult:
         """Run a set of SurrealQL statements against the database.
 
         Args:
@@ -148,7 +147,7 @@ class SyncTemplate:
         """
         raise NotImplementedError(f"query not implemented for: {self}")
 
-    def select(self, thing: Union[str, RecordID, Table]) -> Union[List[dict], dict]:
+    def select(self, thing: Union[str, RecordID, Table]) -> QueryResult:
         """Select all records in a table (or other entity),
         or a specific record, in the database.
 
@@ -166,8 +165,8 @@ class SyncTemplate:
     def create(
         self,
         thing: Union[str, RecordID, Table],
-        data: Optional[Union[Union[List[dict], dict], dict]] = None,
-    ) -> Union[List[dict], dict]:
+        data: Optional[QueryResult] = None,
+    ) -> QueryResult:
         """Create a record in the database.
 
         This function will run the following query in the database:
@@ -184,7 +183,7 @@ class SyncTemplate:
 
     def update(
         self, thing: Union[str, RecordID, Table], data: Optional[Dict] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         """Update all records in a table, or a specific record, in the database.
 
         This function replaces the current document / record data with the
@@ -214,7 +213,7 @@ class SyncTemplate:
 
     def upsert(
         self, thing: Union[str, RecordID, Table], data: Optional[Dict] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         """Insert records into the database, or to update them if they exist.
 
 
@@ -242,7 +241,7 @@ class SyncTemplate:
 
     def merge(
         self, thing: Union[str, RecordID, Table], data: Optional[Dict] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         """Modify by deep merging all records in a table, or a specific record, in the database.
 
         This function merges the current document / record data with the
@@ -274,7 +273,7 @@ class SyncTemplate:
 
     def patch(
         self, thing: Union[str, RecordID, Table], data: Optional[Dict] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         """Apply JSON Patch changes to all records, or a specific record, in the database.
 
         This function patches the current document / record data with
@@ -301,7 +300,7 @@ class SyncTemplate:
         """
         raise NotImplementedError(f"patch not implemented for: {self}")
 
-    def delete(self, thing: Union[str, RecordID, Table]) -> Union[List[dict], dict]:
+    def delete(self, thing: Union[str, RecordID, Table]) -> QueryResult:
         """Delete all records in a table, or a specific record, from the database.
 
         This function will run the following query in the database:
@@ -327,9 +326,7 @@ class SyncTemplate:
         """
         raise NotImplementedError(f"info not implemented for: {self}")
 
-    def insert(
-        self, table: Union[str, Table], data: Union[List[dict], dict]
-    ) -> Union[List[dict], dict]:
+    def insert(self, table: Union[str, Table], data: QueryResult) -> QueryResult:
         """
         Inserts one or multiple records in the database.
 
@@ -347,8 +344,8 @@ class SyncTemplate:
         raise NotImplementedError(f"insert not implemented for: {self}")
 
     def insert_relation(
-        self, table: Union[str, Table], data: Union[List[dict], dict]
-    ) -> Union[List[dict], dict]:
+        self, table: Union[str, Table], data: QueryResult
+    ) -> QueryResult:
         """
         Inserts one or multiple relations in the database.
 

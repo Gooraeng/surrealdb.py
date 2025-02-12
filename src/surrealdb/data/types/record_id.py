@@ -3,6 +3,12 @@ Defines the data type for the record ID.
 """
 
 
+from typing import List, Union
+
+
+QueryResult = Union[List[dict], dict]
+
+
 class RecordID:
     """
     An identifier of the record. This class houses the ID of the row, and the table name.

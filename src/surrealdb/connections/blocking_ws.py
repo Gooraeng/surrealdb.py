@@ -13,7 +13,7 @@ from surrealdb.connections.sync_template import SyncTemplate
 from surrealdb.connections.url import Url
 from surrealdb.connections.utils_mixin import UtilsMixin
 from surrealdb.data.cbor import decode
-from surrealdb.data.types.record_id import RecordID
+from surrealdb.data.types.record_id import RecordID, QueryResult
 from surrealdb.data.types.table import Table
 from surrealdb.request_message.message import RequestMessage
 from surrealdb.request_message.methods import RequestMethod
@@ -47,23 +47,40 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
         self.socket = None
 
     def _send(
-        self, message: RequestMessage, process: str, bypass: bool = False
-    ) -> dict:
+        self,
+        message: RequestMessage,
+        process: str,
+        bypass: bool = False,
+        get_result: bool = False,
+    ) -> Any:
+
+        # will always not be None as the self.connect ensures there's a connection.
+        self.connect()
+        self.socket.send(message.WS_CBOR_DESCRIPTOR)
+        response = decode(self.socket.recv())
+        if bypass is False:
+            self.check_response_for_error(response, process)
+        if get_result:
+            return self.check_response_for_result(response, process)
+        return response
+
+    def connect(self, url: Optional[str] = None) -> None:
+        # overwrite params if passed in
+        if url is not None:
+            self.url = Url(url)
+            self.raw_url = f"{self.url.raw_url}/rpc"
+            self.host = self.url.hostname
+            self.port = self.url.port
         if self.socket is None:
             self.socket = ws_sync.connect(
                 self.raw_url,
                 max_size=None,
                 subprotocols=[websockets.Subprotocol("cbor")],
             )
-        self.socket.send(message.WS_CBOR_DESCRIPTOR)
-        response = decode(self.socket.recv())
-        if bypass is False:
-            self.check_response_for_error(response, process)
-        return response
 
     def authenticate(self, token: str) -> dict:
         message = RequestMessage(self.id, RequestMethod.AUTHENTICATE, token=token)
-        return self._send(message, "authenticating")
+        return self._send(message, "authenticating", get_result=True)
 
     def invalidate(self) -> None:
         message = RequestMessage(self.id, RequestMethod.INVALIDATE)
@@ -72,9 +89,7 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
 
     def signup(self, vars: Dict) -> str:
         message = RequestMessage(self.id, RequestMethod.SIGN_UP, data=vars)
-        response = self._send(message, "signup")
-        self.check_response_for_result(response, "signup")
-        return response["result"]
+        return self._send(message, "signup", get_result=True)
 
     def signin(self, vars: Dict[str, Any]) -> str:
         message = RequestMessage(
@@ -87,16 +102,13 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
             namespace=vars.get("namespace"),
             variables=vars.get("variables"),
         )
-        response = self._send(message, "signing in")
-        self.check_response_for_result(response, "signing in")
-        self.token = response["result"]
-        return response["result"]
+        response = self._send(message, "signing in", get_result=True)
+        self.token = response
+        return response
 
     def info(self) -> dict:
         message = RequestMessage(self.id, RequestMethod.INFO)
-        response = self._send(message, "getting database information")
-        self.check_response_for_result(response, "getting database information")
-        return response["result"]
+        return self._send(message, "getting database information", get_result=True)
 
     def use(self, namespace: str, database: str) -> None:
         message = RequestMessage(
@@ -116,9 +128,8 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
             query=query,
             params=params,
         )
-        response = self._send(message, "query")
-        self.check_response_for_result(response, "query")
-        return response["result"][0]["result"]
+        response = self._send(message, "query", get_result=True)
+        return response[0]["result"]
 
     def query_raw(self, query: str, params: Optional[dict] = None) -> dict:
         if params is None:
@@ -129,14 +140,11 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
             query=query,
             params=params,
         )
-        response = self._send(message, "query", bypass=True)
-        return response
+        return self._send(message, "query", bypass=True)
 
     def version(self) -> str:
         message = RequestMessage(self.id, RequestMethod.VERSION)
-        response = self._send(message, "getting database version")
-        self.check_response_for_result(response, "getting database version")
-        return response["result"]
+        return self._send(message, "getting database version", get_result=True)
 
     def let(self, key: str, value: Any) -> None:
         message = RequestMessage(self.id, RequestMethod.LET, key=key, value=value)
@@ -146,17 +154,15 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
         message = RequestMessage(self.id, RequestMethod.UNSET, params=[key])
         self._send(message, "unsetting")
 
-    def select(self, thing: Union[str, RecordID, Table]) -> Union[List[dict], dict]:
+    def select(self, thing: Union[str, RecordID, Table]) -> QueryResult:
         message = RequestMessage(self.id, RequestMethod.SELECT, params=[thing])
-        response = self._send(message, "select")
-        self.check_response_for_result(response, "select")
-        return response["result"]
+        return self._send(message, "select", get_result=True)
 
     def create(
         self,
         thing: Union[str, RecordID, Table],
-        data: Optional[Union[Union[List[dict], dict], dict]] = None,
-    ) -> Union[List[dict], dict]:
+        data: Optional[QueryResult] = None,
+    ) -> QueryResult:
         if isinstance(thing, str):
             if ":" in thing:
                 buffer = thing.split(":")
@@ -164,9 +170,7 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
         message = RequestMessage(
             self.id, RequestMethod.CREATE, collection=thing, data=data
         )
-        response = self._send(message, "create")
-        self.check_response_for_result(response, "create")
-        return response["result"]
+        return self._send(message, "create", get_result=True)
 
     def live(self, table: Union[str, Table], diff: bool = False) -> UUID:
         message = RequestMessage(
@@ -174,59 +178,45 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
             RequestMethod.LIVE,
             table=table,
         )
-        response = self._send(message, "live")
-        self.check_response_for_result(response, "live")
-        return response["result"]
+        return self._send(message, "live", get_result=True)
 
     def kill(self, query_uuid: Union[str, UUID]) -> None:
         message = RequestMessage(self.id, RequestMethod.KILL, uuid=query_uuid)
         self._send(message, "kill")
 
-    def delete(self, thing: Union[str, RecordID, Table]) -> Union[List[dict], dict]:
+    def delete(self, thing: Union[str, RecordID, Table]) -> QueryResult:
         message = RequestMessage(self.id, RequestMethod.DELETE, record_id=thing)
-        response = self._send(message, "delete")
-        self.check_response_for_result(response, "delete")
-        return response["result"]
+        return self._send(message, "delete", get_result=True)
 
-    def insert(
-        self, table: Union[str, Table], data: Union[List[dict], dict]
-    ) -> Union[List[dict], dict]:
+    def insert(self, table: Union[str, Table], data: QueryResult) -> QueryResult:
         message = RequestMessage(
             self.id, RequestMethod.INSERT, collection=table, params=data
         )
-        response = self._send(message, "insert")
-        self.check_response_for_result(response, "insert")
-        return response["result"]
+        return self._send(message, "insert", get_result=True)
 
     def insert_relation(
-        self, table: Union[str, Table], data: Union[List[dict], dict]
-    ) -> Union[List[dict], dict]:
+        self, table: Union[str, Table], data: QueryResult
+    ) -> QueryResult:
         message = RequestMessage(
             self.id, RequestMethod.INSERT_RELATION, table=table, params=data
         )
-        response = self._send(message, "insert_relation")
-        self.check_response_for_result(response, "insert_relation")
-        return response["result"]
+        return self._send(message, "insert_relation", get_result=True)
 
     def merge(
         self, thing: Union[str, RecordID, Table], data: Optional[Dict] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         message = RequestMessage(
             self.id, RequestMethod.MERGE, record_id=thing, data=data
         )
-        response = self._send(message, "merge")
-        self.check_response_for_result(response, "merge")
-        return response["result"]
+        return self._send(message, "merge", get_result=True)
 
     def patch(
         self, thing: Union[str, RecordID, Table], data: Optional[List[dict]] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         message = RequestMessage(
             self.id, RequestMethod.PATCH, collection=thing, params=data
         )
-        response = self._send(message, "patch")
-        self.check_response_for_result(response, "patch")
-        return response["result"]
+        return self._send(message, "patch", get_result=True)
 
     def subscribe_live(
         self, query_uuid: Union[str, UUID]
@@ -259,23 +249,19 @@ class BlockingWsSurrealConnection(SyncTemplate, UtilsMixin):
 
     def update(
         self, thing: Union[str, RecordID, Table], data: Optional[Dict] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         message = RequestMessage(
             self.id, RequestMethod.UPDATE, record_id=thing, data=data
         )
-        response = self._send(message, "update")
-        self.check_response_for_result(response, "update")
-        return response["result"]
+        return self._send(message, "update", get_result=True)
 
     def upsert(
         self, thing: Union[str, RecordID, Table], data: Optional[Dict] = None
-    ) -> Union[List[dict], dict]:
+    ) -> QueryResult:
         message = RequestMessage(
             self.id, RequestMethod.UPSERT, record_id=thing, data=data
         )
-        response = self._send(message, "upsert")
-        self.check_response_for_result(response, "upsert")
-        return response["result"]
+        return self._send(message, "upsert", get_result=True)
 
     def close(self):
         self.socket.close()
